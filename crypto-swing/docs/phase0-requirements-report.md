@@ -250,7 +250,8 @@ Contract tests run against recorded responses.
 |---|---|---|
 | XMR | A crypto.com price page shows it as "not tradable" | **Treat as untradable** |
 | ZEC | Crypto.com has price pages and published ZEC market commentary in Sep/Oct 2026, but I found **no confirmation that it's tradable on the Exchange for UK users**. Kraken UK delisted XMR but kept ZEC | **Unverified. Please check in your account** |
-| DASH and others | No UK-specific finding | **Unverified** |
+| DASH | **You confirmed on 2026-10-04 that it's tradable in your UK Exchange account** | Tradable |
+| Others | No UK-specific finding | **Unverified** |
 
 - The UK has **no statutory privacy-coin ban**. From **July 2027**, EU rules bar regulated platforms from handling anonymity-enhancing tokens. How ZEC's optional privacy will be treated is undecided. None of this applies to the UK directly, but it may change Crypto.com's global listing decisions.
 - **How the code handles it:**
@@ -491,6 +492,50 @@ Phase 1 may also show the rules don't beat holding BTC on a risk-adjusted basis.
 - **Exposure** is marked to market. The 50% cap blocks **new** entries and never forces sales. A position that grows past 20% of equity triggers an alert.
 - **"No meaningful progress after 3 weeks"** will be defined numerically in Phase 1, for example a maximum gain of less than 1× the stop distance. It won't be tuned to any case study.
 - **Unlocks:** a coin with no unlock data passes only if CoinGecko shows it ≥ 95% circulating (fully-circulating PoW coins like LTC and BTC). Otherwise the gate fails closed.
+
+---
+
+## 9. Manual-execution option (added after your reply)
+
+In this mode the system does everything except place orders. It scans daily and picks the setups that pass the rules. For each pick it sets entry zones, position sizes, stops and targets, and sends you **exact order tickets** on Telegram. It also tells you when to move a stop, take profit or exit. **You place every order yourself on the Crypto.com Exchange** (the Exchange, not the main App, which is usually more expensive).
+
+**What drops out**
+- **Trading API key:** replaced by a **read-only** key, which can't trade or withdraw. Read-only keys don't need an IP whitelist (only trading and withdrawal keys do), so **no static IP or VPS**.
+- **Order execution and reconciliation code:** gone. That's the riskiest code in the project.
+- **Supabase Pro:** a local database with nightly backups is enough. Supabase free is optional.
+
+**What stays the same**
+- Phase 1 is unchanged: the backtest, the stop-method test and the case studies (ZEC included).
+- The risk rules stay in code. Sizes are computed from live sub-account equity, read with the read-only key, and the exposure caps still apply.
+- Paper tracking stays too. Every recommendation is time-stamped before its outcome, so you get an honest record whether or not you act on it.
+
+**Monthly cost (USD)**
+
+| Item | Cheapest | Recommended |
+|---|---|---|
+| Market data, derivatives context, fundamentals, news, GitHub | $0 | $0 |
+| Unlock data | $0. You check the 1–3 finalists yourself via a link (about 2 minutes) | $69 (Tokenomist Pro, automatic) |
+| AI: Opus analyst, plus Haiku news filter on the Batch API | about $20 (range $10–50) | about $20 (range $10–50) |
+| GPT second opinion | none (you are the veto) | optional, about $20 (entries plus weekly re-reviews) |
+| Database, monitoring, Telegram, IP | $0 | $0 |
+| **Total** | **about $20** | **about $90** (about $110 with GPT) |
+
+- **One-off for Phase 1:** $129. There's no cheaper way to get a survivorship-free history back to 2018.
+- **Trading fees will cost more than the subscriptions.** At Level 1, a round trip costs about 0.6–1.2% of the position, including spread. For example, four $5k trades a month cost about $120–$240 in fees and spread. Your buy and sell volume will probably lift you to Level 2 (≥ $10k of 30-day volume: 0.20% maker, 0.40% taker) or higher.
+
+**Account size (manual mode):** using the same quarter-of-edge rule as Section 6.3:
+- **Cheapest option:** sensible from about **$10k–$20k**.
+- **Recommended option:** sensible from about **$45k**.
+
+**What manual mode costs you instead of money**
+1. **The gap before your stop is placed.** If an entry limit fills at 3am, the position has no stop until you place one. Two fixes:
+   - Use an entry order that automatically places its stop when it fills (OTO/OTOCO). Whether these are available in the Exchange **UI** is **unverified**, so please check.
+   - Otherwise, only place entry orders when you can set the stop straight after the fill.
+2. **Delay.** Daily signals land just after 00:00 UTC, which is about 1am UK time in summer. Phase 1 will model execution at **08:00 UK the next morning**, so the backtest reflects a human, not a robot.
+3. **Workload.** Expect roughly 2–5 actions a week with a few positions open:
+   - entries
+   - placing stops and take-profits
+   - moving stops when the system tells you to
 
 ---
 

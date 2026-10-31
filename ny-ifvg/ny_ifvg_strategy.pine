@@ -1,0 +1,147 @@
+//@version=6
+// NY-session inverse-FVG strategy for NQ / MNQ, 5-minute chart.
+// Rules (from the video): 1) EMA bias  2) fair value gap (FVG) inside the pullback
+// against the bias  3) enter when that FVG is inverted (a candle closes through it).
+// One trade per day, fixed $ risk, fixed reward:risk target.
+// Settings marked (ASSUMED) are not stated in the video; set them from the creator's full breakdown.
+strategy("NY iFVG (EMA bias) - NQ/MNQ", shorttitle = "NY iFVG", overlay = true,
+     initial_capital = 50000, default_qty_type = strategy.fixed, default_qty_value = 1,
+     commission_type = strategy.commission.cash_per_contract, commission_value = 1.0,
+     slippage = 1, pyramiding = 0, max_bars_back = 500)
+
+// ---------- Inputs ----------
+grpB      = "Bias (EMAs)"
+emaTf     = input.timeframe("15", "EMA timeframe (ASSUMED)", group = grpB)
+len1      = input.int(9, "Fast EMA - white (ASSUMED)", minval = 1, group = grpB)
+len2      = input.int(21, "Mid EMA - green (ASSUMED)", minval = 1, group = grpB)
+len3      = input.int(50, "Slow EMA - red (ASSUMED)", minval = 1, group = grpB)
+slopeBars = input.int(12, "Slope lookback in chart bars (ASSUMED)", minval = 1, group = grpB)
+needAll   = input.bool(true, "All 3 EMAs must slope with the bias", group = grpB)
+
+grpS      = "Session (New York time)"
+nySess    = input.session("0930-1600", "NY session", group = grpS)
+entrySess = input.session("0930-1130", "Entry window (ASSUMED)", group = grpS)
+flatSess  = input.session("1550-1600", "Flatten all by", group = grpS)
+tz        = "America/New_York"
+
+grpR       = "Risk"
+riskUsd    = input.float(500, "Risk per trade ($)", minval = 1, group = grpR)
+rr         = input.float(2.0, "Reward : risk", minval = 0.1, step = 0.1, group = grpR)
+maxQty     = input.int(10, "Max contracts", minval = 1, group = grpR)
+bufTicks   = input.int(4, "Stop buffer beyond pullback extreme, ticks (ASSUMED)", minval = 0, group = grpR)
+minStopPts = input.float(5, "Skip if stop narrower than (points)", minval = 0, group = grpR)
+maxStopPts = input.float(60, "Skip if stop wider than (points)", minval = 1, group = grpR)
+oneMin     = input.bool(false, "Trade 1 contract if risk $ buys less than 1", group = grpR)
+
+// ---------- EMAs (higher timeframe, no lookahead) ----------
+c1 = ta.ema(close, len1)
+c2 = ta.ema(close, len2)
+c3 = ta.ema(close, len3)
+h1 = request.security(syminfo.tickerid, emaTf, ta.ema(close, len1)[1], lookahead = barmerge.lookahead_on)
+h2 = request.security(syminfo.tickerid, emaTf, ta.ema(close, len2)[1], lookahead = barmerge.lookahead_on)
+h3 = request.security(syminfo.tickerid, emaTf, ta.ema(close, len3)[1], lookahead = barmerge.lookahead_on)
+e1 = emaTf == "" ? c1 : h1
+e2 = emaTf == "" ? c2 : h2
+e3 = emaTf == "" ? c3 : h3
+
+slopeUp = e3 > e3[slopeBars] and (not needAll or (e1 > e1[slopeBars] and e2 > e2[slopeBars]))
+slopeDn = e3 < e3[slopeBars] and (not needAll or (e1 < e1[slopeBars] and e2 < e2[slopeBars]))
+
+// ---------- Session ----------
+inNY    = not na(time(timeframe.period, nySess, tz))
+inEntry = not na(time(timeframe.period, entrySess, tz))
+inFlat  = not na(time(timeframe.period, flatSess, tz))
+newDay  = inNY and not inNY[1]
+
+// ---------- State ----------
+var int   bias   = 0      // +1 long only, -1 short only, 0 no trade today
+var bool  traded = false
+var int   gDir   = 0      // +1 bullish FVG (used for shorts), -1 bearish FVG (used for longs)
+var float gTop   = na
+var float gBot   = na
+var int   gBar   = na
+var float ext    = na     // pullback extreme, used for the stop
+
+if newDay
+    traded := false
+    gDir   := 0
+    gTop   := na
+    gBot   := na
+    ext    := na
+    above = close > e1 and close > e2 and close > e3
+    below = close < e1 and close < e2 and close < e3
+    bias := below and slopeDn ? -1 : above and slopeUp ? 1 : 0
+
+flat     = strategy.position_size == 0
+canTrade = inEntry and inNY[2] and not traded and flat and bias != 0
+
+longSig  = false
+shortSig = false
+
+// Track the pullback extreme while a gap is armed
+if canTrade and gDir != 0
+    ext := gDir == 1 ? (na(ext) ? high : math.max(ext, high)) : (na(ext) ? low : math.min(ext, low))
+
+// Step 3: inversion of the armed FVG -> entry
+if canTrade and gDir != 0 and bar_index > gBar
+    if bias == -1 and gDir == 1 and close < gBot
+        stopPx  = ext + bufTicks * syminfo.mintick
+        riskPts = stopPx - close
+        qty = math.min(math.floor(riskUsd / (riskPts * syminfo.pointvalue)), maxQty)
+        if qty < 1 and oneMin
+            qty := 1
+        if riskPts >= minStopPts and riskPts <= maxStopPts and qty >= 1
+            strategy.entry("Short", strategy.short, qty = qty)
+            strategy.exit("Short exit", "Short", stop = stopPx, limit = close - rr * riskPts)
+            traded   := true
+            shortSig := true
+        gDir := 0
+        ext  := na
+    else if bias == 1 and gDir == -1 and close > gTop
+        stopPx  = ext - bufTicks * syminfo.mintick
+        riskPts = close - stopPx
+        qty = math.min(math.floor(riskUsd / (riskPts * syminfo.pointvalue)), maxQty)
+        if qty < 1 and oneMin
+            qty := 1
+        if riskPts >= minStopPts and riskPts <= maxStopPts and qty >= 1
+            strategy.entry("Long", strategy.long, qty = qty)
+            strategy.exit("Long exit", "Long", stop = stopPx, limit = close + rr * riskPts)
+            traded  := true
+            longSig := true
+        gDir := 0
+        ext  := na
+
+// Step 2: arm the most recent FVG formed in the pullback against the bias
+bullGap = low > high[2]     // gap up: appears while price pulls back up in a bearish day
+bearGap = high < low[2]     // gap down: appears while price pulls back down in a bullish day
+if canTrade and not traded
+    if bias == -1 and bullGap
+        gDir := 1
+        gTop := low
+        gBot := high[2]
+        gBar := bar_index
+        hi3  = math.max(high, high[1], high[2])
+        ext  := na(ext) ? hi3 : math.max(ext, hi3)
+    else if bias == 1 and bearGap
+        gDir := -1
+        gTop := low[2]
+        gBot := high
+        gBar := bar_index
+        lo3  = math.min(low, low[1], low[2])
+        ext  := na(ext) ? lo3 : math.min(ext, lo3)
+
+// Flatten at the end of the session
+if (inFlat or not inNY) and strategy.position_size != 0
+    strategy.close_all(comment = "End of day")
+
+// ---------- Visuals and alerts ----------
+plot(e1, "Fast EMA", color.white)
+plot(e2, "Mid EMA", color.green)
+plot(e3, "Slow EMA", color.red)
+plot(gDir != 0 ? gTop : na, "FVG top", color.orange, style = plot.style_linebr)
+plot(gDir != 0 ? gBot : na, "FVG bottom", color.orange, style = plot.style_linebr)
+bgcolor(inEntry ? color.new(color.blue, 92) : na, title = "Entry window")
+plotshape(newDay and bias == 1, "Bias long", shape.triangleup, location.bottom, color.green, size = size.tiny)
+plotshape(newDay and bias == -1, "Bias short", shape.triangledown, location.top, color.red, size = size.tiny)
+alertcondition(longSig, "iFVG long", "NY iFVG LONG signal on {{ticker}} at {{close}}")
+alertcondition(shortSig, "iFVG short", "NY iFVG SHORT signal on {{ticker}} at {{close}}")

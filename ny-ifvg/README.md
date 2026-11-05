@@ -11,7 +11,7 @@ Pine Script v6 strategy built from the video "How Much Can You Make in 1 Week Tr
 
 ## Not stated in the video (adjustable settings, marked ASSUMED)
 - EMA lengths and timeframe: defaults are 9/21/50 on 15-minute. The lines on screen step, which suggests a higher timeframe.
-- How the slope is judged, and when bias is set. Here bias is set by the close of the first 5-minute bar after 9:30 New York time.
+- How the slope is judged. Bias is checked on every candle: price above or below the red EMA, with the EMAs sloping the same way. Settings let you require price beyond all three EMAs, or lock the bias at the 9:30 open.
 - What "three layers of protection" means. Here the stop goes beyond the pullback's high or low plus a buffer.
 - Entry window: 9:30 to 11:30 New York time. Everything is flattened by 15:50.
 

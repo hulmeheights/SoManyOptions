@@ -17,6 +17,8 @@ len2      = input.int(21, "Mid EMA - green (ASSUMED)", minval = 1, group = grpB)
 len3      = input.int(50, "Slow EMA - red (ASSUMED)", minval = 1, group = grpB)
 slopeBars = input.int(12, "Slope lookback in chart bars (ASSUMED)", minval = 1, group = grpB)
 needAll   = input.bool(true, "All 3 EMAs must slope with the bias", group = grpB)
+beyondAll = input.bool(false, "Price must be beyond all 3 EMAs (off = red EMA only)", group = grpB)
+lockBias  = input.bool(false, "Lock bias at the 9:30 open (off = checked every candle)", group = grpB)
 
 grpS      = "Session (New York time)"
 nySess    = input.session("0930-1600", "NY session", group = grpS)
@@ -46,6 +48,9 @@ e3 = emaTf == "" ? c3 : h3
 
 slopeUp = e3 > e3[slopeBars] and (not needAll or (e1 > e1[slopeBars] and e2 > e2[slopeBars]))
 slopeDn = e3 < e3[slopeBars] and (not needAll or (e1 < e1[slopeBars] and e2 < e2[slopeBars]))
+above   = beyondAll ? (close > e1 and close > e2 and close > e3) : close > e3
+below   = beyondAll ? (close < e1 and close < e2 and close < e3) : close < e3
+liveBias = below and slopeDn ? -1 : above and slopeUp ? 1 : 0
 
 // ---------- Session ----------
 inNY    = not na(time(timeframe.period, nySess, tz))
@@ -54,7 +59,7 @@ inFlat  = not na(time(timeframe.period, flatSess, tz))
 newDay  = inNY and not inNY[1]
 
 // ---------- State ----------
-var int   bias   = 0      // +1 long only, -1 short only, 0 no trade today
+var int   openBias = 0    // bias at the open, used only when lockBias is on
 var bool  traded = false
 var int   gDir   = 0      // +1 bullish FVG (used for shorts), -1 bearish FVG (used for longs)
 var float gTop   = na
@@ -68,9 +73,15 @@ if newDay
     gTop   := na
     gBot   := na
     ext    := na
-    above = close > e1 and close > e2 and close > e3
-    below = close < e1 and close < e2 and close < e3
-    bias := below and slopeDn ? -1 : above and slopeUp ? 1 : 0
+    openBias := liveBias
+
+// +1 longs only, -1 shorts only, 0 no trade on this candle
+bias = lockBias ? openBias : liveBias
+
+// A bias flip cancels a gap armed for the other side
+if (gDir == 1 and bias == 1) or (gDir == -1 and bias == -1)
+    gDir := 0
+    ext  := na
 
 flat     = strategy.position_size == 0
 canTrade = inEntry and inNY[2] and not traded and flat and bias != 0
@@ -141,7 +152,7 @@ plot(e3, "Slow EMA", color.red)
 plot(gDir != 0 ? gTop : na, "FVG top", color.orange, style = plot.style_linebr)
 plot(gDir != 0 ? gBot : na, "FVG bottom", color.orange, style = plot.style_linebr)
 bgcolor(inEntry ? color.new(color.blue, 92) : na, title = "Entry window")
-plotshape(newDay and bias == 1, "Bias long", shape.triangleup, location.bottom, color.green, size = size.tiny)
-plotshape(newDay and bias == -1, "Bias short", shape.triangledown, location.top, color.red, size = size.tiny)
+plotshape(bias == 1 and bias[1] != 1 and inNY, "Bias long", shape.triangleup, location.bottom, color.green, size = size.tiny)
+plotshape(bias == -1 and bias[1] != -1 and inNY, "Bias short", shape.triangledown, location.top, color.red, size = size.tiny)
 alertcondition(longSig, "iFVG long", "NY iFVG LONG signal on {{ticker}} at {{close}}")
 alertcondition(shortSig, "iFVG short", "NY iFVG SHORT signal on {{ticker}} at {{close}}")
